@@ -1,4 +1,5 @@
 #import <CoreFoundation/CoreFoundation.h>
+#include <unistd.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
@@ -24,26 +25,19 @@ pthread_t logger;
 void initFramebuffer() {
   CGContextRef context;
 
-  NSLog(@"[*] Connection init\n");
+  printf("[*] Connection init\n");
+  printf("[*] size variable init\n");
   IOMobileFramebufferDisplaySize size;
+  printf("[*] getting main display\n");
   IOMobileFramebufferGetMainDisplay(&fbConn);
+  printf("[*] getting display size\n");
   IOMobileFramebufferGetDisplaySize(fbConn, &size);
+  printf("[i] found size %f*%f\n", size.height, size.width);
+  printf("[*] getting iosurface\n");
   IOMobileFramebufferGetLayerDefaultSurface(fbConn, 0, &surface);
+  printf("[i] got surface %p\n", surface);
 
-/*
-  NSDictionary *dict = @{
-    //@"CAWindowServerSurface": @YES,
-    @"CreationProperties": @{@"IOSurfacePixelSizeCastingAllowed": @YES},
-    @"IOSurfaceIsGlobal": @YES,
-    @"IOSurfaceName": @"CA Framebuffer (Default)",
-    @"IOSurfacePixelFormat": @('RGBA'),
-    @"IOSurfaceWidth": @(IOSurfaceGetWidth(oldSurface)),
-    @"IOSurfaceHeight": @(IOSurfaceGetHeight(oldSurface))
-  };
-  surface = IOSurfaceCreate((__bridge CFDictionaryRef)dict);
-  NSLog(@"SURFACE %p\n", surface);
-*/
-
+  printf("[*] vinfo setup\n");
   struct vc_info vinfo;
   vinfo.v_width = IOSurfaceGetWidth(surface);
   vinfo.v_height = IOSurfaceGetHeight(surface);
@@ -53,26 +47,28 @@ void initFramebuffer() {
   vinfo.v_name[0]  = 0;
   vinfo.v_rowbytes = IOSurfaceGetBytesPerRow(surface);
   vinfo.v_baseaddr = (unsigned long)IOSurfaceGetBaseAddress(surface);
+  printf("[*] initializing\n");
   initialize_prescreen(vinfo);
 
-  printf("PTR %p\n", IOSurfaceGetBaseAddress(surface));
+  printf("[√] PTR %p\n", IOSurfaceGetBaseAddress(surface));
 }
 
 
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
+    printf("FBWrite\n");
 		if (argc < 2) {
-			printf("[*] Usage: %s <string>\n", argv[0]);
+      printf("[!] Expected 1 argument, got %d\n", argc - 1);
+			printf("Usage: %s <string>\n", argv[0]);
 			return 1;
 		}
-    printf("[*] Initializing fb\n");
-    // FIXME: This always segfaults
+    printf("[*] fb init\n");
     initFramebuffer();
     ssize_t rsize;
     char c;
 
     printf("[*] Hammer time.\n");
-    sleep(1);
+    usleep(25000); // prevent any terminal output from messing with fb writes
     CGRect frame = CGRectMake(0, 0, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface));
     uint8_t linesPrinted = 0;
     vcputc(0, 0, argv[1]);

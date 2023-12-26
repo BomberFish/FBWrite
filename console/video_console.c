@@ -491,6 +491,7 @@ gc_clear_screen(unsigned int xx, unsigned int yy, int top, unsigned int bottom,
 }
 
 static void
+// FIXME: This always segfaults
 gc_enable( boolean_t enable )
 {
 	unsigned char *buffer_attributes = NULL;
@@ -501,8 +502,8 @@ gc_enable( boolean_t enable )
 	uint32_t buffer_rows = 0;
 	uint32_t buffer_size = 0;
 	spl_t s;
-
 	if (enable == FALSE) {
+		printf("[*] gc_enable(FALSE)\n");
 		// only disable console output if it goes to the graphics console
 		if (console_is_serial() == FALSE) {
 			disableConsoleOutput = TRUE;
@@ -512,6 +513,7 @@ gc_enable( boolean_t enable )
 	}
 
 	s = splhigh();
+	printf("[*] VCPUTC_LOCK_LOCK\n");
 	VCPUTC_LOCK_LOCK();
 
 	if (gc_buffer_size) {
@@ -531,6 +533,7 @@ gc_enable( boolean_t enable )
 		gc_buffer_rows       = 0;
 		gc_buffer_size       = 0;
 
+		printf("[*] VCPUTC_LOCK_UNLOCK\n");
 		VCPUTC_LOCK_UNLOCK();
 		splx( s );
 
@@ -539,17 +542,21 @@ gc_enable( boolean_t enable )
 		kheap_free( KHEAP_DATA_BUFFERS, buffer_colorcodes, buffer_size );
 		kheap_free( KHEAP_DATA_BUFFERS, buffer_tab_stops, buffer_columns );
 	} else {
+		printf("[*] VCPUTC_LOCK_UNLOCK\n");
 		VCPUTC_LOCK_UNLOCK();
 		splx( s );
 	}
 
 	if (enable) {
+		printf("[*] gc_enable(TRUE)\n");
 		if (vm_initialized) {
+			printf("[*] buffer setup\n");
 			buffer_columns = vinfo.v_columns;
 			buffer_rows    = vinfo.v_rows;
 			buffer_size    = buffer_columns * buffer_rows;
 
 			if (buffer_size) {
+				printf("[*] moar buffer setup\n");
 				buffer_attributes = kheap_alloc( KHEAP_DATA_BUFFERS, buffer_size, Z_WAITOK );
 				buffer_characters = kheap_alloc( KHEAP_DATA_BUFFERS, buffer_size, Z_WAITOK );
 				buffer_colorcodes = kheap_alloc( KHEAP_DATA_BUFFERS, buffer_size, Z_WAITOK );
@@ -559,6 +566,7 @@ gc_enable( boolean_t enable )
 				    buffer_characters == NULL ||
 				    buffer_colorcodes == NULL ||
 				    buffer_tab_stops == NULL) {
+					printf("[*] even moar buffer setup\n");
 					if (buffer_attributes) {
 						kheap_free( KHEAP_DATA_BUFFERS, buffer_attributes, buffer_size );
 					}
@@ -589,6 +597,7 @@ gc_enable( boolean_t enable )
 		}
 
 		s = splhigh();
+		printf("[*] VCPUTC_LOCK_LOCK\n");
 		VCPUTC_LOCK_LOCK();
 
 		gc_buffer_attributes = buffer_attributes;
@@ -599,17 +608,23 @@ gc_enable( boolean_t enable )
 		gc_buffer_rows       = buffer_rows;
 		gc_buffer_size       = buffer_size;
 
+		printf("[*] resetting screen\n");
 		gc_reset_screen();
 
+		printf("[*] VCPUTC_LOCK_UNLOCK\n");
 		VCPUTC_LOCK_UNLOCK();
 		splx( s );
 
+		printf("[*] clearing screen\n");
 		gc_ops.clear_screen(gc_x, gc_y, 0, vinfo.v_rows, 2);
+		printf("[*] showing cursor at %d,%d\n", gc_x, gc_y);
 		gc_ops.show_cursor(gc_x, gc_y);
 
+		printf("[*] gc enable\n");
 		gc_ops.enable(TRUE);
 		gc_enabled           = TRUE;
 		disableConsoleOutput = FALSE;
+		printf("[*] gc_enable over and out.\n");
 	}
 }
 
@@ -1121,8 +1136,10 @@ gc_putc_square(unsigned char ch)
 static void
 gc_reset_screen(void)
 {
+	printf("[*] gc_reset_screen\n");
 	gc_reset_vt100();
 	gc_x = gc_y = 0;
+	printf("[√] screen reset\n");
 }
 
 static void
@@ -3002,7 +3019,7 @@ void initialize_prescreen(struct vc_info new_vinfo) {
 
    vinfo = new_vinfo;
 
-   printf("initialize_screen: b=%08llX, w=%08X, h=%08X, r=%08X, d=%08X\n",                  /* (BRINGUP) */
+   printf("[i] initialize_screen: b=%08llX, w=%08X, h=%08X, r=%08X, d=%08X\n",                  /* (BRINGUP) */
 			    new_vinfo.v_physaddr, new_vinfo.v_width, new_vinfo.v_height, new_vinfo.v_rowbytes, new_vinfo.v_type);       /* (BRINGUP) */
 
    gc_ops.initialize   = vc_initialize;
@@ -3014,6 +3031,7 @@ void initialize_prescreen(struct vc_info new_vinfo) {
    gc_ops.hide_cursor  = vc_reverse_cursor;
    gc_ops.show_cursor  = vc_reverse_cursor;
    gc_ops.update_color = vc_update_color;
+   printf("[*] gc_initialize\n");
    gc_initialize(&vinfo);
 
    gc_graphics_boot = TRUE;
@@ -3023,9 +3041,12 @@ void initialize_prescreen(struct vc_info new_vinfo) {
    bzero(&vc_user_options, sizeof(vc_user_options));
 
    vc_progress_white = TRUE;
+   printf("[*] vc_progress_set\n");
    vc_progress_set( TRUE /* graphics_now */, 1 /* delay */ );
 
+   printf("[*] gc_enable\n");
    gc_enable( TRUE );
+   printf("[√] acquired gc\n");
    gc_acquired = TRUE;
 }
 
