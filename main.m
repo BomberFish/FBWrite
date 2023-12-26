@@ -66,6 +66,7 @@ int main(int argc, char *argv[], char *envp[]) {
 			return 1;
 		}
     printf("[*] Initializing fb\n");
+    // FIXME: This always segfaults
     initFramebuffer();
     ssize_t rsize;
     char c;
