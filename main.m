@@ -12,9 +12,9 @@
 
 #include "console/video_console.c"
 
-void IOMobileFramebufferSwapDirtyRegion(IOMobileFramebufferConnection conn);
+//void IOMobileFramebufferSwapDirtyRegion(IOMobileFramebufferRef conn);
 
-IOMobileFramebufferConnection fbConn;
+IOMobileFramebufferRef fbConn;
 IOSurfaceRef surface, oldSurface;
 
 pthread_t logger;
@@ -34,7 +34,18 @@ void initFramebuffer() {
   IOMobileFramebufferGetDisplaySize(fbConn, &size);
   printf("[i] found size %f*%f\n", size.height, size.width);
   printf("[*] getting iosurface\n");
-  IOMobileFramebufferGetLayerDefaultSurface(fbConn, 0, &surface);
+
+  NSDictionary *properties = @{
+    (id)kIOSurfaceIsGlobal: @(NO),
+    (id)kIOSurfaceWidth: @(size.width),
+    (id)kIOSurfaceHeight: @(size.height),
+    (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA'),
+    (id)kIOSurfaceBytesPerElement: @(4)
+  };
+  surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
+
+  //IOMobileFramebufferGetLayerDefaultSurface
+  //IOMobileFramebufferCopyLayerDisplayedSurface(fbConn, 0, &surface);
   printf("[i] got surface %p\n", surface);
 
   printf("[*] vinfo setup\n");
@@ -48,11 +59,35 @@ void initFramebuffer() {
   vinfo.v_rowbytes = IOSurfaceGetBytesPerRow(surface);
   vinfo.v_baseaddr = (unsigned long)IOSurfaceGetBaseAddress(surface);
   printf("[*] initializing\n");
+  IOSurfaceLock(surface, 0, nil);
+  memset((void *)vinfo.v_baseaddr, 0xFFFFFFFF, vinfo.v_width * vinfo.v_height);
   initialize_prescreen(vinfo);
+  IOSurfaceUnlock(surface, 0, 0);
 
   printf("[√] PTR %p\n", IOSurfaceGetBaseAddress(surface));
+
+  int token;
+  CGRect frame = CGRectMake(0, 0, vinfo.v_width, vinfo.v_height);
+  IOMobileFramebufferSwapBegin(fbConn, &token);
+  IOMobileFramebufferSwapSetLayer(fbConn, 0, surface, frame, frame, 0);
+  IOMobileFramebufferSwapEnd(fbConn);
 }
 
+void printText(char *str) {
+    //CGRect frame = CGRectMake(0, 0, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface));
+    for (int i = 0; str[i]; i++) {
+        //IOSurfaceLock(surface, 0, nil);
+        char c = str[i];
+        vcputc(0, 0, c);
+        if (c == '\n' || !str[i+1]) {
+            vcputc(0, 0, '\r');
+            //IOSurfaceUnlock(surface, 0, 0);
+            //IOMobileFramebufferSwapBegin(fbConn, NULL);
+            //IOMobileFramebufferSwapSetLayer(fbConn, 0, surface, frame, frame);
+            //IOMobileFramebufferSwapEnd(fbConn);
+        }
+    }
+}
 
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
@@ -64,24 +99,18 @@ int main(int argc, char *argv[], char *envp[]) {
 		}
     printf("[*] fb init\n");
     initFramebuffer();
-    ssize_t rsize;
-    char c;
 
     printf("[*] Hammer time.\n");
     usleep(25000); // prevent any terminal output from messing with fb writes
-    CGRect frame = CGRectMake(0, 0, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface));
-    uint8_t linesPrinted = 0;
-    vcputc(0, 0, argv[1]);
-    if (c == '\n') {
-        vcputc(0, 0, '\r');
 
-        if (linesPrinted < 80) {
-            ++linesPrinted;
-            IOMobileFramebufferSwapBegin(fbConn, NULL);
-            IOMobileFramebufferSwapSetLayer(fbConn, 0, surface, frame, frame);
-            IOMobileFramebufferSwapEnd(fbConn);
-        }
+    printText(argv[1]);
+
+    for (int i = 0; i < 60; i++) {
+        printText("Printing each 16ms, framebuffer write legit 101%\n");
+        usleep(16666);
     }
-		return 0;
+    sleep(1);
+
+    return 0;
 	}
 }

@@ -14,6 +14,7 @@ FBWrite_FRAMEWORKS = Foundation IOKit IOSurface CoreGraphics
 # you need to patch your sdk for this
 FBWrite_EXTRA_FRAMEWORKS = IOMobileFramebuffer
 FBWrite_CFLAGS = -fobjc-arc
+FBWrite_LDFLAGS = -F./Frameworks
 FBWrite_CODESIGN_FLAGS = -Sentitlements.plist
 FBWrite_INSTALL_PATH = /usr/local/bin
 
