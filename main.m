@@ -91,6 +91,7 @@ void printText(char *str) {
             //IOMobileFramebufferSwapEnd(fbConn);
         }
     }
+    usleep(16666);
 }
 
 // based on disassembly of `dmesg` command on macOS
@@ -113,7 +114,9 @@ void printDmesg(void) {
     if (rax_3 != 0) {
         int64_t rax_4 = malloc(rax_3 << 2);
         strvis(rax_4, msgbuf, 0);
-        printText((char*)rax_4);
+        for(int i; i < rax_3; i++) {
+          printText((char*)rax_4);
+        }
     } else {
       return;
     }
@@ -129,13 +132,15 @@ int main(int argc, char *argv[], char *envp[]) {
 		}
     printf("[*] fb init\n");
     initFramebuffer();
+    CGRect frame = CGRectMake(0, 0, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface));
 
     printf("[*] Hammer time.\n");
     usleep(25000); // prevent any terminal output from messing with fb writes
     if (argv[1] == "--dmesg") {
       printDmesg();
     } else {
-        printText(argv[1]);
+      printText(argv[1]);
+      sleep(1);
     }
 
     return 0;
