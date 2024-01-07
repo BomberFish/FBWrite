@@ -7,15 +7,15 @@ ARCHS = arm64
 # theos boilerplate
 include $(THEOS)/makefiles/common.mk
 
-TOOL_NAME = FBWrite
+TOOL_NAME = FBWriteImage
 
-FBWrite_FILES = main.m
-FBWrite_FRAMEWORKS = Foundation IOKit IOSurface CoreGraphics
-# you need to patch your sdk for this
-FBWrite_EXTRA_FRAMEWORKS = IOMobileFramebuffer
-FBWrite_CFLAGS = -fobjc-arc
-FBWrite_LDFLAGS = -F./Frameworks
-FBWrite_CODESIGN_FLAGS = -Sentitlements.plist
-FBWrite_INSTALL_PATH = /usr/local/bin
+FBWriteImage_FILES = main.m
+FBWriteImage_FRAMEWORKS = Foundation IOKit IOSurface CoreGraphics
+FBWriteImage_PRIVATE_FRAMEWORKS = IOSurface
+FBWriteImage_EXTRA_FRAMEWORKS = IOMobileFramebuffer
+FBWriteImage_CFLAGS = -fobjc-arc
+FBWriteImage_LDFLAGS = -F./Frameworks
+FBWriteImage_CODESIGN_FLAGS = -Sentitlements.plist
+FBWriteImage_INSTALL_PATH = /usr/local/bin
 
 include $(THEOS_MAKE_PATH)/tool.mk

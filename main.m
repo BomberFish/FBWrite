@@ -1,143 +1,126 @@
-#import <CoreFoundation/CoreFoundation.h>
-#include <unistd.h>
-#import <CoreGraphics/CoreGraphics.h>
-#import <Foundation/Foundation.h>
-#import <IOKit/IOKitLib.h>
-#import <IOSurface/IOSurfaceRef.h>
-#import "IOMobileFramebuffer.h"
-#include <mach/mach.h>
-#include <pthread.h>
-#include <spawn.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <sys/sysctl.h>
-#include <vis.h>
+@import IOSurface;
+@import Foundation;
+@import CoreFoundation;
 
-#include "console/video_console.c"
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <assert.h>
+#include <IOKit/IOKitLib.h>
+#include <IOKit/IOTypes.h>
+#include <dlfcn.h>
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/CGImageSource.h>
+#include "IOMobileFramebuffer.h"
+#include <sys/stat.h>
 
-//void IOMobileFramebufferSwapDirtyRegion(IOMobileFramebufferRef conn);
-int proc_kmsgbuf(void * buffer, uint32_t buffersize);
+#include "img/boot-happy.c"
+#include "img/boot-sad.c"
 
-IOMobileFramebufferRef fbConn;
-IOSurfaceRef surface, oldSurface;
+#define WHITE 0xffffffff
+#define BLACK 0x00000000
+static void *base = NULL;
+static int bytesPerRow = 0;
+static int height = 0;
+static int width = 0;
 
-pthread_t logger;
-// int pfd[2];
+int init_display(void) {
+    if (base) return 0;
+    IOMobileFramebufferRef display;
+    IOMobileFramebufferGetMainDisplay(&display);
+    IOMobileFramebufferDisplaySize size;
+    IOMobileFramebufferGetDisplaySize(display, &size);
+    IOSurfaceRef buffer;
+    IOMobileFramebufferGetLayerDefaultSurface(display, 0, &buffer);
+    printf("got display %p\n", display);
+    width = size.width;
+    height = size.height;
+    printf("width: %d, height: %d\n", width, height);
 
-// void initialize_prescreen(struct vc_info vinfo);
-
-void initFramebuffer(void) {
-  CGContextRef context;
-
-  printf("[*] Connection init\n");
-  printf("[*] size variable init\n");
-  IOMobileFramebufferDisplaySize size;
-  printf("[*] getting main display\n");
-  IOMobileFramebufferGetMainDisplay(&fbConn);
-  printf("[*] getting display size\n");
-  IOMobileFramebufferGetDisplaySize(fbConn, &size);
-  printf("[i] found size %f*%f\n", size.height, size.width);
-  printf("[*] getting iosurface\n");
-
-  NSDictionary *properties = @{
-    (id)kIOSurfaceIsGlobal: @(NO),
-    (id)kIOSurfaceWidth: @(size.width),
-    (id)kIOSurfaceHeight: @(size.height),
-    (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA'),
-    (id)kIOSurfaceBytesPerElement: @(4)
-  };
-  surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
-
-  //IOMobileFramebufferGetLayerDefaultSurface
-  //IOMobileFramebufferCopyLayerDisplayedSurface(fbConn, 0, &surface);
-  printf("[i] got surface %p\n", surface);
-
-  printf("[*] vinfo setup\n");
-  struct vc_info vinfo;
-  vinfo.v_width = IOSurfaceGetWidth(surface);
-  vinfo.v_height = IOSurfaceGetHeight(surface);
-  vinfo.v_depth = 32; // 16, 32?
-  vinfo.v_type = 0;
-  vinfo.v_scale = 2; //kPEScaleFactor2x;
-  vinfo.v_name[0]  = 0;
-  vinfo.v_rowbytes = IOSurfaceGetBytesPerRow(surface);
-  vinfo.v_baseaddr = (unsigned long)IOSurfaceGetBaseAddress(surface);
-  printf("[*] initializing\n");
-  IOSurfaceLock(surface, 0, nil);
-  memset((void *)vinfo.v_baseaddr, 0xFFFFFFFF, vinfo.v_width * vinfo.v_height);
-  initialize_prescreen(vinfo);
-  IOSurfaceUnlock(surface, 0, 0);
-
-  printf("[√] PTR %p\n", IOSurfaceGetBaseAddress(surface));
-
-  int token;
-  CGRect frame = CGRectMake(0, 0, vinfo.v_width, vinfo.v_height);
-  IOMobileFramebufferSwapBegin(fbConn, &token);
-  IOMobileFramebufferSwapSetLayer(fbConn, 0, surface, frame, frame, 0);
-  IOMobileFramebufferSwapEnd(fbConn);
-}
-
-void printText(char *str) {
-    //CGRect frame = CGRectMake(0, 0, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface));
-    for (int i = 0; str[i]; i++) {
-        //IOSurfaceLock(surface, 0, nil);
-        char c = str[i];
-        vcputc(0, 0, c);
-        if (c == '\n' || !str[i+1]) {
-            vcputc(0, 0, '\r');
-            //IOSurfaceUnlock(surface, 0, 0);
-            //IOMobileFramebufferSwapBegin(fbConn, NULL);
-            //IOMobileFramebufferSwapSetLayer(fbConn, 0, surface, frame, frame);
-            //IOMobileFramebufferSwapEnd(fbConn);
+    // create buffer
+    CFMutableDictionaryRef properties = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
+    CFDictionarySetValue(properties, CFSTR("IOSurfaceIsGlobal"), kCFBooleanFalse);
+    CFDictionarySetValue(properties, CFSTR("IOSurfaceWidth"), CFNumberCreate(NULL, kCFNumberIntType, &width));
+    CFDictionarySetValue(properties, CFSTR("IOSurfaceHeight"), CFNumberCreate(NULL, kCFNumberIntType, &height));
+    CFDictionarySetValue(properties, CFSTR("IOSurfacePixelFormat"), CFNumberCreate(NULL, kCFNumberIntType, &(int){ 0x42475241 }));
+    CFDictionarySetValue(properties, CFSTR("IOSurfaceBytesPerElement"), CFNumberCreate(NULL, kCFNumberIntType, &(int){ 4 }));
+    buffer = IOSurfaceCreate(properties);
+    printf("created buffer at: %p\n", buffer);
+    IOSurfaceLock(buffer, 0, 0);
+    printf("locked buffer\n");
+    base = IOSurfaceGetBaseAddress(buffer);
+    printf("got base address at: %p\n", base);
+    bytesPerRow = IOSurfaceGetBytesPerRow(buffer);
+    printf("got bytes per row: %d\n", bytesPerRow);
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int offset = i * bytesPerRow + j * 4;
+            *(int *)(base + offset) = 0xFFFFFFFF;
         }
     }
-}
+    printf("wrote to buffer\n");
+    IOSurfaceUnlock(buffer, 0, 0);
+    printf("unlocked buffer\n");
 
-// based on disassembly of `dmesg` command on macOS
-// i assumed variable names, but anything i can't figure out is kept the same as binja's hlil
-void printDmesg(void) {
-    int64_t var_28 = 4; // unknown. perhaps loglevel?
-    int32_t buffersize;
-    if (sysctlbyname("kern.msgbuf", &buffersize, &var_28, 0, 0) != 0) {
-        printf("[!] Unable to size kernel buffer!\n");
-        return;
-    }
-    int64_t msgbuf = malloc(buffersize);
-    if (msgbuf == 0) {
-        printf("[!] Unable to allocate a message buffer!\n");
-        return;
-    }
-    
-    int32_t rax_3 = proc_kmsgbuf(msgbuf, buffersize);
-    
-    if (rax_3 != 0) {
-        int64_t rax_4 = malloc(rax_3 << 2);
-        strvis(rax_4, msgbuf, 0);
-        printText((char*)rax_4);
-    } else {
-      return;
-    }
-}
-
-int main(int argc, char *argv[], char *envp[]) {
-	@autoreleasepool {
-    printf("FBWrite\n");
-		if (argc < 2) {
-      printf("[!] Expected 1 argument, got %d\n", argc - 1);
-			printf("Usage: \n%s <string>\n%s --dmesg\n", argv[0], argv[0]);
-			return 1;
-		}
-    printf("[*] fb init\n");
-    initFramebuffer();
-
-    printf("[*] Hammer time.\n");
-    usleep(25000); // prevent any terminal output from messing with fb writes
-    if (argv[1] == "--dmesg") {
-      printDmesg();
-    } else {
-        printText(argv[1]);
-    }
-
+    int token;
+    IOMobileFramebufferSwapBegin(display, &token);
+    IOMobileFramebufferSwapSetLayer(display, 0, buffer, (CGRect){ 0, 0, width, height }, (CGRect){ 0, 0, width, height }, 0);
+    IOMobileFramebufferSwapEnd(display);
     return 0;
-	}
+}
+
+#define BOOT_IMAGE_PATH "/cores/binpack/usr/share/boot.jp2"
+
+int main(int argc, char **argv) {
+    init_display();
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int offset = i * bytesPerRow + j * 4;
+            *(int *)(base + offset) = 0x00000000;
+        }
+    }
+
+    CFDataRef data = NULL;
+    CGDataProviderRef cgDataProvider = NULL;
+    CGImageRef cgImage = NULL;
+    CGContextRef context = NULL;
+    int retval = -1;
+    if (argc == 2) {
+      if (strcmp(argv[1], "failure") == 0) {
+        data = CFDataCreate(NULL, sadmac, 2048 * 2732);
+      } else {
+        data = CFDataCreate(NULL, happymac, 2048 * 2732);
+      }
+    } else {
+      data = CFDataCreate(NULL, happymac, 2048 * 2732);
+    }
+    if (!data) {
+        fprintf(stderr, "could not create image URL\n");
+        goto finish;
+    }
+    cgDataProvider = CGDataProviderCreateWithCFData(data);
+    if (!cgDataProvider) {
+        fprintf(stderr, "could not create image source\n");
+        goto finish;
+    }
+    cgImage = CGImageCreate(2048, 2732, 8, 8, 2732, CGColorSpaceCreateDeviceGray(), kCGBitmapByteOrderDefault, cgDataProvider, NULL, true, kCGRenderingIntentDefault);
+    if (!cgImage) {
+        fprintf(stderr, "could not create image\n");
+        goto finish;
+    }
+    context = CGBitmapContextCreate(base, 2048, 2732, 8, 2732, CGColorSpaceCreateDeviceRGB(), kCGImageAlphaPremultipliedFirst);
+    if (!context) {
+        fprintf(stderr, "could not create context\n");
+        goto finish;
+    }
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), cgImage);
+    retval = 0;
+    fprintf(stderr, "bootscreend: done\n");
+finish:
+    if (context) CGContextRelease(context);
+    if (cgImage) CGImageRelease(cgImage);
+    if (cgDataProvider) CFRelease(cgDataProvider);
+    if (data) CFRelease(data);
+
+    return retval;
 }
